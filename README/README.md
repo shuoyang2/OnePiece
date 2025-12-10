@@ -220,7 +220,7 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $args.num\_blocks
 #### **改进1: HSTU (Hierarchical Sequential Transduction Unit)** 
 针对生成式推荐任务，我们测试了HSTU架构，它使用一个统一的块替代了MHA和FFN。
 - **结构:** HSTU 同样在Pre-LN 之后应用。其核心计算分为三步：
-  1.  **逐点投影 (Pointwise Projection):** 输入 $X$首先通过一个大型线性层 `f1_linear`，并应用 $\phi_1$ (SiLU)激活，一次性生成四个中间张量：$U, Q_{proj}, K_{proj}, V_{proj} = \phi_1(f1\_linear}(X))$。
+  1.  **逐点投影 (Pointwise Projection):** 输入 $X$首先通过一个大型线性层 `f1_linear`，并应用 $\phi_1$ (SiLU)激活，一次性生成四个中间张量：$U, Q_{proj}, K_{proj}, V_{proj} = \phi_1(f1\_{linear}(X))$。
   2.  **空间聚合 (Spatial Aggregation):** $Q, K, V$被重塑为多头形式。注意力分数计算为$\text{Scores} = \frac{Q K^T}{\sqrt{d_k}} + \text{RAB}$，其中$\text{RAB}$是一个可学习的相对位置偏置（`self.rel_pos_bias`），类似于T5。关键在于，HSTU使用第二次SiLU激活$\phi_2$替代Softmax：$\text{Weights} = \phi_2(\text{Scores})$。在应用掩码和Dropout后，计算出$\text{AttnOut} = \text{Weights} \cdot V$。
   3.  **逐点变换 (Pointwise Transformation):** 最终输出由 $U$门控（Gating）并由 `f2_linear`投影：$Y = f2\_linear(\text{AttnOut} \odot U)$。
 - **收益:** 我们将Transformer替换为HSTU（并移除绝对位置编码），分数从$0.0731137$ 上涨到 $0.0755008$，且模型Scaling的收益更明显。
