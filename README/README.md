@@ -18,7 +18,7 @@
 
 ![alt text](month_Similarity.png)
 
-  通过按月的形式将数据分片，之后我们计算任意两天（Day $i$, Day$j$）的活跃物品集合的相似度。我们采用 **Jaccard 相似度**作为度量指标：$$J(Day_i, Day_j) = \frac{|Items(Day_i) \cap Items(Day_j)|}{|Items(Day_i) \cup Items(Day_j)|}$$其中 $Items(Day_k)$ 是第 $k$ 天出现过的所有物品的集合。我们将这10个月的结果分别绘制成了热力图 (Heatmaps)。
+  通过按月的形式将数据分片，之后我们计算任意两天（Day $i$, Day$j$）的活跃物品集合的相似度。我们采用 **Jaccard 相似度**作为度量指标：$J(Day_i, Day_j) = \frac{|Items(Day_i) \cap Items(Day_j)|}{|Items(Day_i) \cup Items(Day_j)|}$其中 $Items(Day_k)$ 是第 $k$ 天出现过的所有物品的集合。我们将这10个月的结果分别绘制成了热力图 (Heatmaps)。
 
   可以发现：**非对角线（$i \neq j$）上的所有值都持续处于极低的水平**，相隔一天之间的Jaccard相似度普遍 $< 0.3$，有些月份甚至在$0.1$以下。而相隔大于两天的Jaccard相似度普遍 $< 0.1$。这说明了数据集的一个关键特性：**Item是分阶段曝光的，且大部分Item只会在短期内有曝光！**，这让我们明确了绝对时间的重要性，但在复赛中，我们陷入了长时间的异常：即通过引入绝对时间特征，validation loss显著下降，但评估指标呈现负向。最终定位到BUG是因为我们引入了User Info的时间戳信息，导致存在严重的数据泄露。修复后，年、月、日形式的绝对时间特征大约贡献了千5的收益。
 
@@ -163,12 +163,12 @@
 ### 训练阶段
 在训练阶段，模型同时接收多种不同信号：
 #### 预测 Sid1
-$\text{Sid1}$ 的 logits $\mathcal{L}_1$ 通过基础 Query $q_0$ 聚合上下文$H$ 得到： $$\begin{align}c_1 &= f_{\text{context}}(Q=H, K=H, V=H) \\\mathcal{L}_1 &= \text{Projection}_{\text{sid1}}(c_1) \cdot W_{SID}^T \end{align}$$ 其损失 $L_{SID1}$ 为： $$\begin{equation}L_{SID1} = \text{CrossEntropy}(\mathcal{L}_1, y_{\text{sid1}})\end{equation}$$
+$\text{Sid1}$ 的 logits $\mathcal{L}_1$ 通过基础 Query $q_0$ 聚合上下文$H$ 得到： $\begin{align}c_1 &= f_{\text{context}}(Q=H, K=H, V=H) \\\mathcal{L}_1 &= \text{Projection}_{\text{sid1}}(c_1) \cdot W_{SID}^T \end{align}$ 其损失 $L_{SID1}$ 为： $\begin{equation}L_{SID1} = \text{CrossEntropy}(\mathcal{L}_1, y_{\text{sid1}})\end{equation}$
 #### 预测 Sid2
-我们使用真实的 `Sid1` 标签 $y_{\text{sid1}}$ 来构建 `Sid2` 的 Query$q_2$： $$\begin{align}e_1 &= \text{Embedding}(y_{\text{sid1}}) \in \mathbb{R}^{D_{emb}} \\q_2 &= f_{\text{query}}(\text{Concat}(H, e_1)) \in \mathbb{R}^{D}\end{align}$$ 然后，使用 $q_2$ 聚合上下文 $H$ 来预测 `Sid2`：$$\begin{align}c_2 &= f_{\text{context}}(Q=q_2, K=H, V=H) \\ \mathcal{L}_2 &= \text{Projection}_{\text{sid2}}(c_2) \cdot W_{SID}^T\end{align}$$ 其损失 $L_{SID2}$ 为： $$\begin{equation}L_{SID2} = \text{CrossEntropy}(\mathcal{L}_2, y_{\text{sid2}})\end{equation}$$ 
+我们使用真实的 `Sid1` 标签 $y_{\text{sid1}}$ 来构建 `Sid2` 的 Query$q_2$： $\begin{align}e_1 &= \text{Embedding}(y_{\text{sid1}}) \in \mathbb{R}^{D_{emb}} \\q_2 &= f_{\text{query}}(\text{Concat}(H, e_1)) \in \mathbb{R}^{D}\end{align}$ 然后，使用 $q_2$ 聚合上下文 $H$ 来预测 `Sid2`：$\begin{align}c_2 &= f_{\text{context}}(Q=q_2, K=H, V=H) \\ \mathcal{L}_2 &= \text{Projection}_{\text{sid2}}(c_2) \cdot W_{SID}^T\end{align}$ 其损失 $L_{SID2}$ 为： $\begin{equation}L_{SID2} = \text{CrossEntropy}(\mathcal{L}_2, y_{\text{sid2}})\end{equation}$ 
 #### InfoNCE
 我们采用了在赛事讨论中非常关键的InfoNCE损失，对于一个Query$q_i$，其正样本为 $k_i^+$，负样本集 $\mathcal{K}_i^-$为该Batch内所有其他 $B-1$ 个用户的正样本 $\{k_j^+\}_{j \ne i}$。
-    - **公式：** 损失函数（已应用Logq纠偏）定义为：$$L_{\text{InfoNCE}}(q_i, k_i^+) = - \log \frac{\exp(s(q_i, k_i^+) / \tau - \log q(k_i^+))}{\sum_{j=1}^{B} \exp(s(q_i, k_j) / \tau - \log q(k_j))}$$其中 $s(\cdot)$ 是相似度函数， $\tau$ 是温度系数， $\log q(k_j)$是Logq纠偏项。
+    - **公式：** 损失函数（已应用Logq纠偏）定义为：$L_{\text{InfoNCE}}(q_i, k_i^+) = - \log \frac{\exp(s(q_i, k_i^+) / \tau - \log q(k_i^+))}{\sum_{j=1}^{B} \exp(s(q_i, k_j) / \tau - \log q(k_j))}$其中 $s(\cdot)$ 是相似度函数， $\tau$ 是温度系数， $\log q(k_j)$是Logq纠偏项。
 
 
 综上，总损失$L_{\text{total}} = \alpha L_{SID1} + \beta L_{SID2} + L_{\text{InfoNCE}}(q_i, k_i^+)$ 。
@@ -177,12 +177,12 @@ $\text{Sid1}$ 的 logits $\mathcal{L}_1$ 通过基础 Query $q_0$ 聚合上下�
 我们的模型能够同时兼容SID Softmax和InfoNCE两种训练任务，在推理时这两个模块各司其职，协同进行Top10 Item的筛选。在推理阶段，我们采用 Beam Search 策略（Beam 宽度为 $B$）来寻找最大化联合概率 $P(\text{sid1}, \text{sid2})$ 的序列。
 #### 阶段一：预测 Sid1 (Beam 初始化)
 1. 我们首先计算 $\text{Sid1}$ 的对数概率$\text{log\_probs}_1 = \text{LogSoftmax}(\mathcal{L}_1)$。
-2. 选取概率最高的 Top-B 个 SID 及其分数，作为 $B$ 个初始 Beam：$$\begin{equation}\text{Beams}_{\text{init}} = \{(s_{1,j}, \text{score}_j)\}_{j=1}^B\end{equation}$$ 其中 $s_{1,j}$ 是 $\text{Sid1}$索引，$\text{score}_j = \text{log\_probs}_1[s_{1,j}]$。
+2. 选取概率最高的 Top-B 个 SID 及其分数，作为 $B$ 个初始 Beam：$\begin{equation}\text{Beams}_{\text{init}} = \{(s_{1,j}, \text{score}_j)\}_{j=1}^B\end{equation}$ 其中 $s_{1,j}$ 是 $\text{Sid1}$索引，$\text{score}_j = \text{log\_probs}_1[s_{1,j}]$。
 #### 阶段二：预测 Sid2 (Beam 扩展)
-我们并行地为 $B$ 个 Beam 中的每一个 $j$ 生成 $\text{Sid2}$ 的预测。此时，我们使用阶段一预测出的 $\text{Sid1}$ $s_{1,j}$ 来构建 Query$q_2$： $$\begin{align}e_{1,j} &= \text{Embedding}(s_{1,j}) \\q_{2,j} &= f_{\text{query}}(\text{Concat}(q_0, e_{1,j}))\end{align}$$ 我们使用 $q_{2,j}$ 计算出该 Beam 对应的 $\text{Sid2}$的对数概率 $log\_probs_{2,j}$。
+我们并行地为 $B$ 个 Beam 中的每一个 $j$ 生成 $\text{Sid2}$ 的预测。此时，我们使用阶段一预测出的 $\text{Sid1}$ $s_{1,j}$ 来构建 Query$q_2$： $\begin{align}e_{1,j} &= \text{Embedding}(s_{1,j}) \\q_{2,j} &= f_{\text{query}}(\text{Concat}(q_0, e_{1,j}))\end{align}$ 我们使用 $q_{2,j}$ 计算出该 Beam 对应的 $\text{Sid2}$的对数概率 $log\_probs_{2,j}$。
 
 #### Beam Seach TopK （K=384）
-为了找到最优序列，我们使用概率相加策略，计算 $B \times K$个候选序列的联合对数概率： $$\begin{equation}\text{Score}(s_{1,j}, s_k) = \underbrace{\text{score}_j}_{\log P(s_{1,j})} + \underbrace{\text{log\_probs}_{2,j}[s_k]}_{\log P(s_k | s_{1,j})}\end{equation}$$。最终的候选序列，是从所有组合中，联合对数概率$(\text{Score})$ 最高的 Top-K 个 $(\text{sid1}, \text{sid2})$ 序列，同时通过sid组合来反向解析出它的原本的Item集合，记作为$C_{\text{sid}}$。
+为了找到最优序列，我们使用概率相加策略，计算 $B \times K$个候选序列的联合对数概率： $\begin{equation}\text{Score}(s_{1,j}, s_k) = \underbrace{\text{score}_j}_{\log P(s_{1,j})} + \underbrace{\text{log\_probs}_{2,j}[s_k]}_{\log P(s_k | s_{1,j})}\end{equation}$。最终的候选序列，是从所有组合中，联合对数概率$(\text{Score})$ 最高的 Top-K 个 $(\text{sid1}, \text{sid2})$ 序列，同时通过sid组合来反向解析出它的原本的Item集合，记作为$C_{\text{sid}}$。
 
 #### InfoNCE Rank TopK (K=10)
 1.  对于一个用户，我们计算其Query Embedding $q_u$。
@@ -233,13 +233,13 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $args.num\_blocks
 #### **改进3: Deepseek MoE (Mixture of Experts)**
 初赛时，我们不仅分离了Embedding层和DNN、Transformer内部隐藏层的维度，还将Transformer的FFN层隐藏层维度额外设置了一个倍率。具体而言，我们增加了一个参数$\text{feed\_forward\_hidden\_units}$，我们将FFN层的维度额外扩大，变为$\text{args.hidden\_units} \times \text{args.dnn\_hidden\_units} \times \text{feed\_forward\_hidden\_units}$(1024维)，得到了较大收益。受FFN层维度扩大带来收益的启发，我们引入了混合专家（MoE）架构。此架构在极大程度上增加参数量的同时，可以控制计算量在可接受范围内。
 ##### **Deepseek MoE结构** 
-我们使用 `DeepseekMoEBlock`替代了传统Transformer块中的FFN层。该MoE块的结构为：$$\begin{aligned}X' & = \text{MHA}(\text{PreLN}(X)) + X \\Y & = \text{MoE}(\text{PreLN}(X')) + X'\end{aligned}$$ 其中 `MoE` 层由门控网络（Gating）、$N$个专家（Experts）和一个可选的共享专家（Shared Expert）组成。
+我们使用 `DeepseekMoEBlock`替代了传统Transformer块中的FFN层。该MoE块的结构为：$\begin{aligned}X' & = \text{MHA}(\text{PreLN}(X)) + X \\Y & = \text{MoE}(\text{PreLN}(X')) + X'\end{aligned}$ 其中 `MoE` 层由门控网络（Gating）、$N$个专家（Experts）和一个可选的共享专家（Shared Expert）组成。
 ##### **门控与路由**
 门控网络 `MoEGate`负责决定每个Token $x_t$（来自$X \in \mathbb{R}^{T \times D}$）应由哪些专家处理。
   - **Gating Logits:** $L(x_t) = x_t \cdot W_g$，其中$W_g \in \mathbb{R}^{D \times N}$ 是可学习的门控权重。
   - **Gating Probabilities:** $P(x_t) = \text{Softmax}(L(x_t))$。
 #####  **专家计算** 
-每个专家 $E_i$是一个标准的FFN（SiLU激活）。共享专家 $E_s$ 也是一个标准FFN。$$E_i(x) = ( \text{SiLU}(x W_{1,i}^{\text{gate}}) \odot (x W_{1,i}^{\text{up}}) ) W_{2,i}$$门控系统根据路由策略选出 Top-K（例如 $K=3$）个专家$I_t = \{i_1, \dots, i_K\}$。 最终输出 $y_t$ 是 $K$个激活专家的输出与共享专家（如果启用）输出的加权和：$$y_t = \sum_{i \in I_t} w_i \cdot E_i(x_t) + E_s(x_t)$$ 其中$w_i$ 是 $P(x_t)_i$ 经过归一化（`norm_topk_prob=True`）后的权重。
+每个专家 $E_i$是一个标准的FFN（SiLU激活）。共享专家 $E_s$ 也是一个标准FFN。$E_i(x) = ( \text{SiLU}(x W_{1,i}^{\text{gate}}) \odot (x W_{1,i}^{\text{up}}) ) W_{2,i}$门控系统根据路由策略选出 Top-K（例如 $K=3$）个专家$I_t = \{i_1, \dots, i_K\}$。 最终输出 $y_t$ 是 $K$个激活专家的输出与共享专家（如果启用）输出的加权和：$y_t = \sum_{i \in I_t} w_i \cdot E_i(x_t) + E_s(x_t)$ 其中$w_i$ 是 $P(x_t)_i$ 经过归一化（`norm_topk_prob=True`）后的权重。
 ##### **避免专家崩溃**
 为防止门控网络将所有Token路由到少数"明星专家"，我们实现了两种负载均衡策略：
 1. **策略1: 序列级辅助损失 (Sequence-level Aux Loss)**：我们仿照Deepseek的实现，在训练时引入辅助损失$L_{\text{aux}}$。
@@ -249,7 +249,7 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $args.num\_blocks
 2.  **策略2: 无损失偏置均衡 (Loss-Free)** 我们也尝试了`LoadBalancingStrategy`。此方法不引入$L_{\text{aux}}$，而是为每个专家 $e$ 维护一个可学习的偏置$b_e$（初始为0）。
     - **路由:** 路由决策基于$P_{\text{route}}(x_t) = P(x_t) + \mathbf{b}$。
     - **加权:** 最终的加权求和 $y_t$ **仍使用**原始的$P(x_t)$，偏置 $\mathbf{b}$ 仅影响路由决策。
-    - **偏置更新:** 偏置 $\mathbf{b}$在训练时更新。计算全局平均负载$\text{AvgLoad} = (T \times K) / N$。若专家 $e$ 的负载$\text{Load}_e < \text{AvgLoad}$，则增大 $b_e$，反之减小：$$\Delta b_e = \alpha_{\text{lb}} \cdot \text{sign}(\text{AvgLoad} - \text{Load}_e)$$
+    - **偏置更新:** 偏置 $\mathbf{b}$在训练时更新。计算全局平均负载$\text{AvgLoad} = (T \times K) / N$。若专家 $e$ 的负载$\text{Load}_e < \text{AvgLoad}$，则增大 $b_e$，反之减小：$\Delta b_e = \alpha_{\text{lb}} \cdot \text{sign}(\text{AvgLoad} - \text{Load}_e)$
 #####  **MoE均衡度测试**
 我们使用专家负载的Gini系数（`_calculate_gini`）来量化均衡性（0为完美均衡，1为完全不均）
 - **HSTU架构:** 将HSTU的 `f2_linear` 替换为MoE（64E-3K-1S）。AuxLoss (0.01) 导致Gini \> 0.8（崩溃）。Loss-Free (更新率0.02)虽使Gini \< 0.1，但导致严重掉分 (0.106385 $\to$ 0.0979128)。下图展示了Loss-Free情况下，第一层专家的Bias和Gini系数。
@@ -264,7 +264,7 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $args.num\_blocks
 在训练过程中，我们对损失函数进行了多轮迭代。
 1.  **InfoNCE损失：** 为解决BCE的缺陷，我们采用了在赛事讨论中非常关键的InfoNCE损失，感谢Ado大佬！
     - **定义：** InfoNCE将相似度检索视为一个多分类问题，其目标是从一个包含一个正样本和$N$ 个负样本的集合中准确地"辨认"出正样本。我们采用的是"In-BatchNegatives"策略：初赛时，使用整个Batch内所有用户的随机负样本拼接为一个大的负样本池；复赛时，对于一个Query$q_i$，其正样本为 $k_i^+$，负样本集 $\mathcal{K}_i^-$为该Batch内所有其他 $B-1$ 个用户的正样本 $\{k_j^+\}_{j \ne i}$。
-    - **公式：** 损失函数（已应用Logq纠偏）定义为：$$L_{\text{InfoNCE}}(q_i, k_i^+) = - \log \frac{\exp(s(q_i, k_i^+) / \tau - \log q(k_i^+))}{\sum_{j=1}^{B} \exp(s(q_i, k_j) / \tau - \log q(k_j))}$$其中 $s(\cdot)$ 是相似度函数， $\tau$ 是温度系数， $\log q(k_j)$是Logq纠偏项。
+    - **公式：** 损失函数（已应用Logq纠偏）定义为：$L_{\text{InfoNCE}}(q_i, k_i^+) = - \log \frac{\exp(s(q_i, k_i^+) / \tau - \log q(k_i^+))}{\sum_{j=1}^{B} \exp(s(q_i, k_j) / \tau - \log q(k_j))}$其中 $s(\cdot)$ 是相似度函数， $\tau$ 是温度系数， $\log q(k_j)$是Logq纠偏项。
     - **相似度函数：** 我们对比了点积（Dot Product）和余弦相似度（Cosine Similarity）。余弦相似度（通过`F.normalize`实现）的得分（$0.04296$）远高于点积（$0.0263922$），因此我们后续均采用余弦相似度。
     - **温度系数 $\tau$：** 我们尝试了可学习温度（`learnable_temp=True`），参数最终收敛到$0.02$ 附近，但得分低于固定温度。经过多轮消融实验，我们最终确定$\tau=0.02$ 为最佳温度。
 
@@ -298,9 +298,9 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $args.num\_blocks
 ##### **优化器：Muon**
 为探索更先进的优化策略，特别是针对大规模Transformer模型训练稳定性和超参数可迁移性的改进，我们引入并实现了Muon优化器。
 - **实现细节 (`muon_update` 函数):** 我们的Muon优化器核心逻辑在`muon_update` 函数中实现，它结合了动量和 $\mu$P 特有的缩放技术：
-  1.  **动量更新:** 首先，使用Nesterov动量更新动量缓存$\mathbf{m}$：$$\mathbf{m}_t = \beta \mathbf{m}_{t-1} + (1 - \beta) \mathbf{g}_t$$计算Nesterov更新方向$\mathbf{u}_t = (1+\beta)\mathbf{m}_t - \beta \mathbf{m}_{t-1}$（代码中简化为$\mathbf{u}_t = \mathbf{g}_t \cdot \text{lerp}(\mathbf{m}_t, \beta)$）。
+  1.  **动量更新:** 首先，使用Nesterov动量更新动量缓存$\mathbf{m}$：$\mathbf{m}_t = \beta \mathbf{m}_{t-1} + (1 - \beta) \mathbf{g}_t$计算Nesterov更新方向$\mathbf{u}_t = (1+\beta)\mathbf{m}_t - \beta \mathbf{m}_{t-1}$（代码中简化为$\mathbf{u}_t = \mathbf{g}_t \cdot \text{lerp}(\mathbf{m}_t, \beta)$）。
   2.  **牛顿-舒尔茨迭代缩放 (`zeropower_via_newtonschulz5`):** 接下来，对更新方向 $\mathbf{u}_t$应用一个基于牛顿-舒尔茨迭代的函数。此迭代通常用于数值计算矩阵函数，如矩阵的逆平方根$X^{-1/2}$ 或正交化。我们的实现 `zeropower_via_newtonschulz5`进行了固定的5步迭代，其近似目标（旨在使更新更符合 $\mu$P的缩放要求。更新后的方向记为 $\mathbf{\tilde{u}}_t$。
-  3.  **维度缩放：** 最后，根据参数梯度张量的形状（特别是最后两个维度$d_{\text{out}}, d_{\text{in}}$，对应于权重矩阵的输出和输入维度），应用一个缩放因子：$$s = \sqrt{\max(1, d_{\text{out}} / d_{\text{in}})}$$最终的更新方向为$\mathbf{\hat{u}}_t = \mathbf{\tilde{u}}_t \cdot s$。这个缩放因子是Muon 的关键组成部分，它确保了对于不同类型的层（如$d_{\text{out}} \gg d_{\text{in}}$ 或$d_{\text{in}} \gg d_{\text{out}}$），参数更新的尺度能正确地随模型宽度变化，从而保持训练动态稳定。
+  3.  **维度缩放：** 最后，根据参数梯度张量的形状（特别是最后两个维度$d_{\text{out}}, d_{\text{in}}$，对应于权重矩阵的输出和输入维度），应用一个缩放因子：$s = \sqrt{\max(1, d_{\text{out}} / d_{\text{in}})}$最终的更新方向为$\mathbf{\hat{u}}_t = \mathbf{\tilde{u}}_t \cdot s$。这个缩放因子是Muon 的关键组成部分，它确保了对于不同类型的层（如$d_{\text{out}} \gg d_{\text{in}}$ 或$d_{\text{in}} \gg d_{\text{out}}$），参数更新的尺度能正确地随模型宽度变化，从而保持训练动态稳定。
 
 - **优化器步骤 (`SingleDeviceMuon.step`):** 在每个优化步骤中：
   - 调用 `muon_update` 计算最终的更新方向 $\mathbf{\hat{u}}_t$。
