@@ -326,5 +326,23 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $\text{args.num\_
 - **观察:** 我们统计发现，在初赛的候选库中，约有$148,971 / 659,988 \approx 22.6\%$的Item是冷启动Item（未在训练集中出现过）。然而，分析我们一个较优模型的Top-10推荐结果发现，冷启动Item的占比极低（仅$0.52\%$）。这表明模型本身倾向于推荐有充分训练信号的热门或中热门Item。
 - **策略:** 基于此观察，我们认为冷启动Item对最终推荐结果的贡献微乎其微，反而可能因为其Embedding接近于随机初始化而引入噪声。因此，我们在构建候选库Embedding的`get_all_candidate_embs` 函数中，直接跳过了这些在 `indexer`中找不到对应ID的冷启动Item。
 - **收益:** 过滤冷启动Item带来了轻微但正向的收益，分数从 $0.102119$上升到 $0.102306$。
+## OneRec架构
+决赛结束后，我们找获得了技术创新奖的料峭春风吹酒醒队交流了思路。按照OneRec架构的思想，我们尝试构建了序列：`user_feature - item_1_sid1 - item_1_sid2 - item_1_feature_ - item_1_action_type - item_2_sid1 - item_2_sid2 - item_2_feature_ - item_2_action_type...`，并使用MoE Transformer作为基本骨架，搭配Rope进行序列外扩。具体而言，模型训练分为下面两个任务：
+1. CTR任务：通过Item Feature位置的输出预测当前的 Action Type。使用cross_entropy_loss进行训练。训练损失、点击AUC、转化AUC依次如下图所示：
+![img.png](img.png)
+![img_1.png](img_1.png)
+![img_2.png](img_2.png)
+2. SID预测任务：
+   1. SID1预测：第 1 个Item的 SID1 由 User Token 预测、后续 SID1 由前一个 Item 的 Action Token 预测。使用cross_entropy_loss进行训练。SID1的训练损失、SID1的Hitrate（即真实SID在预测的top10 SID中）依次如下图所示。
+   ![img_4.png](img_4.png)
+   ![img_3.png](img_3.png)
+   2. SID2预测：使用 SID1 位置的输出预测当前的 SID2。使用cross_entropy_loss进行训练。SID2的训练损失、SID2的Hitrate（即真实SID在预测的top10 SID中）依次如下图所示。
+   ![img_5.png](img_5.png)
+   ![img_6.png](img_6.png)
+### OneRec架构优势
+可以看到，使用了OneRec架构后，Epoch间Loss抖降、Hitrate抖升的现象比我们的原始架构更加明显，说明训练效果更好。另外，SID2的拟合效果明显优于SID1，这是由于SID1、2的组合有限，SID2的拟合难度明显低于SID1导致的。然而，使用原架构时，SID1的拟合效果反而更好。换用OneRec架构后，这种异常现象消失。
+   
+
+
 ## 致谢
 感谢主办方提供的平台和机器资源，让我们队伍有机会接触到顶尖赛事的机会，感谢无私奉献的小红书以及交流群大佬、Cursor老师，高强度奋斗三个多月的经历是难能可贵的，在这场赛事中学到了很多很多。
