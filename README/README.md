@@ -75,7 +75,7 @@
 #### 解决方案: 采用单进程多线程的参数服务器（FedSGD）模式
 我们设计并实现了一个自定义的数据并行框架（见`dataparallel.py`），其核心思想是"单进程、多线程、主卡聚合"。此架构在概念上与联邦学习（FederatedLearning）中的参数服务器（ParameterServer）架构（特别是FedSGD算法）高度相似，完全规避了TCP/PyTorch分布式通信的需求，仅通过内存和CUDA API进行数据交换。
 - **架构核心：** 框架在单个Python进程中运行，该进程控制所有 $k$个可用的GPU设备。主线程（MainThread）负责数据加载、任务分发和最终的参数更新。
-- **数据分发：** 在每个训练步骤中，主线程的 DataLoader一次性读取一个大小为 $B = k \times \texttt{bs}$ 的全局批次（GlobalBatch）。随后，通过 `_distribute_batch` 方法将 $B$沿批次维度（Dimension 0）精确切分为 $k$个子批次（micro-batch）$\{b_0, b_1, \dots, b_{k-1}\}$，其中 $b_i$的大小为 $\texttt{bs}$。
+- **数据分发：** 在每个训练步骤中，主线程的 DataLoader一次性读取一个大小为 $B = k \times bs$ 的全局批次（GlobalBatch）。随后，通过 `_distribute_batch` 方法将 $B$沿批次维度（Dimension 0）精确切分为 $k$个子批次（micro-batch）$\{b_0, b_1, \dots, b_{k-1}\}$，其中 $b_i$的大小为 $bs$。
 - **模型复制与角色定义：**
   - **模型初始化：** 框架在 `__init__`阶段，首先在主设备（`primary_device`，即 `device_ids[0]`，通常是`cuda:0`）上创建原始模型 $M_0$。
   - **模型复制：** 通过 `copy.deepcopy` 深度复制模型，为其他 $k-1$个设备分别创建一个完全独立的模型副本 $\{M_1, \dots, M_{k-1}\}$。每个$M_i$ 被移动到其对应的 `cuda:i` 设备上。
@@ -196,7 +196,7 @@ $\text{Sid1}$ 的 logits $\mathcal{L}_1$ 通过基础 Query $q_0$ 聚合上下�
 - **Item ID哈希压缩:** 其次，我们对ItemID嵌入进行了哈希压缩。在我们的模型实现中，我们将原128维的ItemID嵌入（`item_emb`）降至32维，同时增加了两个哈希嵌入层（`item_hash_emb_a`和 `item_hash_emb_b`），其维度均为 $256$ (来自`args.hash_emb_size`)。第一个哈希词表大小为$2,000,003 + 1$，第二个哈希词表大小为 $3,000,017 + 1$。这样，我们就将Item ID相关的总嵌入缩小到 **约 $6.85 \text{ GB}$**。经过消融实验发现，使用hash item id后，分数从 $0.119837$ 提升到$0.122777$，效果显著。
 
 - **非对称激活 (Asymmetric Activation):** 我们的双塔模型使用余弦相似度（或Dot Product）来衡量用户表征和Item表征的相关性。
-  - **问题：** 用户表征（Query）经过了多层HSTU（含SiLU）或Transformer（含ReLU），其输出向量的值绝大多数为非负数。如果候选库Item（Key）的表征也按标准方式经过$\texttt{itemdnn} + \texttt{ReLU}$激活，那么Query和Key向量将同时变为非负向量。
+  - **问题：** 用户表征（Query）经过了多层HSTU（含SiLU）或Transformer（含ReLU），其输出向量的值绝大多数为非负数。如果候选库Item（Key）的表征也按标准方式经过$itemdnn + ReLU$激活，那么Query和Key向量将同时变为非负向量。
   - **限制：** 这将导致余弦相似度的范围被严格限制在 $[0, 1]$区间，极大地削弱了模型的表征能力和对负样本的区分度。
   - **解决方案：** 我们在 `feat2emb` 函数中 实现了一个"非对称激活"机制。
     - **序列Item (带User融合):** 当处理训练序列中的Item时（`include_user=True`），模型在 `itemdnn`
@@ -210,7 +210,7 @@ $\text{Sid1}$ 的 logits $\mathcal{L}_1$ 通过基础 Query $q_0$ 聚合上下�
 
 
 ### 模型升级改动（二）-Seqence Encoder
-这是我们生成式推荐的核心。在将嵌入投影到 $\texttt{hidden\_dim}$维度后，序列Embedding被送入一个深度编码器（Encoder）以捕捉序列依赖关系。我们在Baseline模型基础上，实现了HSTU、RoPE和DeepseekMoE三种架构。
+这是我们生成式推荐的核心。在将嵌入投影到 $hidden\_dim$维度后，序列Embedding被送入一个深度编码器（Encoder）以捕捉序列依赖关系。我们在Baseline模型基础上，实现了HSTU、RoPE和DeepseekMoE三种架构。
 #### **Baseline: 经典Transformer Encoder** 
 Baseline采用了经典的TransformerEncoder架构，即堆叠 $\text{args.num\_blocks}$ 层的Transformer块。
 - **架构:** 我们采用了 **Pre-LayerNorm (Pre-LN)** 架构，即在每个子层（MHA或FFN）之前应用层归一化。这相比Post-LN架构提供了更稳定的梯度，支持更深层的模型训练。
@@ -220,9 +220,9 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $\text{args.num\_
 #### **改进1: HSTU (Hierarchical Sequential Transduction Unit)** 
 针对生成式推荐任务，我们测试了HSTU架构，它使用一个统一的块替代了MHA和FFN。
 - **结构:** HSTU 同样在Pre-LN 之后应用。其核心计算分为三步：
-  1.  **逐点投影 (Pointwise Projection):** 输入 $X$首先通过一个大型线性层 `f1_linear`，并应用 $\phi_1$ (SiLU)激活，一次性生成四个中间张量：$U, Q_{proj}, K_{proj}, V_{proj} = \phi_1(\texttt{f1\_linear}(X))$。
+  1.  **逐点投影 (Pointwise Projection):** 输入 $X$首先通过一个大型线性层 `f1_linear`，并应用 $\phi_1$ (SiLU)激活，一次性生成四个中间张量：$U, Q_{proj}, K_{proj}, V_{proj} = \phi_1(f1\_linear}(X))$。
   2.  **空间聚合 (Spatial Aggregation):** $Q, K, V$被重塑为多头形式。注意力分数计算为$\text{Scores} = \frac{Q K^T}{\sqrt{d_k}} + \text{RAB}$，其中$\text{RAB}$是一个可学习的相对位置偏置（`self.rel_pos_bias`），类似于T5。关键在于，HSTU使用第二次SiLU激活$\phi_2$替代Softmax：$\text{Weights} = \phi_2(\text{Scores})$。在应用掩码和Dropout后，计算出$\text{AttnOut} = \text{Weights} \cdot V$。
-  3.  **逐点变换 (Pointwise Transformation):** 最终输出由 $U$门控（Gating）并由 `f2_linear`投影：$Y = \texttt{f2\_linear}(\text{AttnOut} \odot U)$。
+  3.  **逐点变换 (Pointwise Transformation):** 最终输出由 $U$门控（Gating）并由 `f2_linear`投影：$Y = f2\_linear(\text{AttnOut} \odot U)$。
 - **收益:** 我们将Transformer替换为HSTU（并移除绝对位置编码），分数从$0.0731137$ 上涨到 $0.0755008$，且模型Scaling的收益更明显。
 #### **改进2: RoPE (Rotary Position Embedding)**
 作为绝对位置编码的替代方案，我们还实现了旋转位置编码（RoPE），仅在传统Transformer和MoE中使用，HSTU不使用。
@@ -290,8 +290,8 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $\text{args.num\_
 为确保深度序列模型（尤其是MoE和HSTU）的训练稳定性并避免过拟合，我们采用了一套组合策略：
 - **Weight Decay (L2正则化):** 我们在优化器层面引入了 $L_2$正则化。该策略通过向损失函数添加一个与参数平方和成正比的惩罚项来限制模型复杂度。在我们的实验中，`weight_decay`系数固定为 $1 \times 10^{-5}$。
 - **Warmup与Cosine Annealing:** 我们采用了"预热+余弦退火"的学习率调度策略（`use_cosine_annealing=True`）。
-  1. **Warmup:**训练总步数（$\text{TotalSteps} = \text{Epochs} \times \text{BatchesPerEpoch}$）的前$10\%$ 被设为线性预热（Linear Warmup）阶段。在此阶段，学习率从一个极小值（$1 \times 10^{-8}$）线性增长至设定的基础学习率 $\texttt{args.lr}$。
-  2. **Cosine Annealing:** 预热结束后，学习率在剩余的 $90\%$步数中，按照余弦函数曲线平滑下降至$\texttt{args.lr\_eta\_min}$（在我们的设置为 $0.0$）。此策略组合通过 `SequentialLR`实现，有助于模型在训练初期稳定渡过梯度剧烈波动的阶段，并在后期更精细地探索最优解。
+  1. **Warmup:**训练总步数（$\text{TotalSteps} = \text{Epochs} \times \text{BatchesPerEpoch}$）的前$10\%$ 被设为线性预热（Linear Warmup）阶段。在此阶段，学习率从一个极小值（$1 \times 10^{-8}$）线性增长至设定的基础学习率 $args.lr$。
+  2. **Cosine Annealing:** 预热结束后，学习率在剩余的 $90\%$步数中，按照余弦函数曲线平滑下降至$args.lr\_eta\_min$（在我们的设置为 $0.0$）。此策略组合通过 `SequentialLR`实现，有助于模型在训练初期稳定渡过梯度剧烈波动的阶段，并在后期更精细地探索最优解。
 
 ##### **优化器：AdamW** 
 我们使用 AdamW作为基础优化器。与传统Adam在计算梯度更新时才应用L2惩罚不同，AdamW将Weight Decay从梯度更新中解耦，直接在参数更新步骤中应用（$w_t \leftarrow w_{t-1} - \eta \lambda w_{t-1} - \dots$），这被证明在现代深度学习模型中更有效。
@@ -307,7 +307,7 @@ Baseline采用了经典的TransformerEncoder架构，即堆叠 $\text{args.num\_
   - 应用解耦权重衰减：$w_t \leftarrow w_{t-1} (1 - \eta \lambda)$。
   - 更新参数：$w_t \leftarrow w_t - \eta \cdot \mathbf{\hat{u}}_t$。
 - **混合优化策略:** 如前文所述，我们在 `MyDataParallelOptimizer`中采用了混合策略：
-  - **Muon参数:** 仅对Transformer/HSTU/DNN块中的权重矩阵（即`ndim >= 2` 且名称匹配的非偏置项）使用 `SingleDeviceMuon`优化器，并为其配置独立的超参数 $\texttt{args.muon\_lr}$ (0.02)和 $\texttt{args.muon\_momentum}$ (0.95)。
+  - **Muon参数:** 仅对Transformer/HSTU/DNN块中的权重矩阵（即`ndim >= 2` 且名称匹配的非偏置项）使用 `SingleDeviceMuon`优化器，并为其配置独立的超参数 $args.muon\_lr$ (0.02)和 $args.muon\_momentum$ (0.95)。
   - **AdamW参数:**
     其他所有参数（Embedding、偏置、LayerNorm参数等）继续使用AdamW优化器。
 - **实验结果：** 这种结合了AdamW的鲁棒性和$\mu$P对权重矩阵优化优势的混合策略，在我们的消融实验中表现出色，将分数从$0.118511$ 提升到了 $0.121122$。
