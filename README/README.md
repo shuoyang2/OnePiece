@@ -179,7 +179,7 @@ $\text{Sid1}$ 的 logits $\mathcal{L}_1$ 通过基础 Query $q_0$ 聚合上下�
 1. 我们首先计算 $\text{Sid1}$ 的对数概率$\text{log\_probs}_1 = \text{LogSoftmax}(\mathcal{L}_1)$。
 2. 选取概率最高的 Top-B 个 SID 及其分数，作为 $B$ 个初始 Beam：$$\begin{equation}\text{Beams}_{\text{init}} = \{(s_{1,j}, \text{score}_j)\}_{j=1}^B\end{equation}$$ 其中 $s_{1,j}$ 是 $\text{Sid1}$索引，$\text{score}_j = \text{log\_probs}_1[s_{1,j}]$。
 #### 阶段二：预测 Sid2 (Beam 扩展)
-我们并行地为 $B$ 个 Beam 中的每一个 $j$ 生成 $\text{Sid2}$ 的预测。此时，我们使用阶段一预测出的 $\text{Sid1}$ $s_{1,j}$ 来构建 Query$q_2$： $$\begin{align}e_{1,j} &= \text{Embedding}(s_{1,j}) \\q_{2,j} &= f_{\text{query}}(\text{Concat}(q_0, e_{1,j}))\end{align}$$ 我们使用 $q_{2,j}$ 计算出该 Beam 对应的 $\text{Sid2}$的对数概率 $\text{log\_probs}_{2,j}$。
+我们并行地为 $B$ 个 Beam 中的每一个 $j$ 生成 $\text{Sid2}$ 的预测。此时，我们使用阶段一预测出的 $\text{Sid1}$ $s_{1,j}$ 来构建 Query$q_2$： $$\begin{align}e_{1,j} &= \text{Embedding}(s_{1,j}) \\q_{2,j} &= f_{\text{query}}(\text{Concat}(q_0, e_{1,j}))\end{align}$$ 我们使用 $q_{2,j}$ 计算出该 Beam 对应的 $\text{Sid2}$的对数概率 $log\_probs_{2,j}$。
 
 #### Beam Seach TopK （K=384）
 为了找到最优序列，我们使用概率相加策略，计算 $B \times K$个候选序列的联合对数概率： $$\begin{equation}\text{Score}(s_{1,j}, s_k) = \underbrace{\text{score}_j}_{\log P(s_{1,j})} + \underbrace{\text{log\_probs}_{2,j}[s_k]}_{\log P(s_k | s_{1,j})}\end{equation}$$。最终的候选序列，是从所有组合中，联合对数概率$(\text{Score})$ 最高的 Top-K 个 $(\text{sid1}, \text{sid2})$ 序列，同时通过sid组合来反向解析出它的原本的Item集合，记作为$C_{\text{sid}}$。
@@ -212,7 +212,7 @@ $\text{Sid1}$ 的 logits $\mathcal{L}_1$ 通过基础 Query $q_0$ 聚合上下�
 ### 模型升级改动（二）-Seqence Encoder
 这是我们生成式推荐的核心。在将嵌入投影到 $hidden\_dim$维度后，序列Embedding被送入一个深度编码器（Encoder）以捕捉序列依赖关系。我们在Baseline模型基础上，实现了HSTU、RoPE和DeepseekMoE三种架构。
 #### **Baseline: 经典Transformer Encoder** 
-Baseline采用了经典的TransformerEncoder架构，即堆叠 $\text{args.num\_blocks}$ 层的Transformer块。
+Baseline采用了经典的TransformerEncoder架构，即堆叠 $args.num\_blocks$ 层的Transformer块。
 - **架构:** 我们采用了 **Pre-LayerNorm (Pre-LN)** 架构，即在每个子层（MHA或FFN）之前应用层归一化。这相比Post-LN架构提供了更稳定的梯度，支持更深层的模型训练。
 - **绝对位置编码:** 序列Embedding通过元素求和的方式，与一个可学习的绝对位置编码（`self.pos_emb`）相结合。
 - **Flash MHA:** 注意力层使用了我们自定义的`FlashMultiHeadAttention`，它在PyTorch 2.0+环境下会自动调用`F.scaled_dot_product_attention`，利用FlashAttention的I/O感知算法减少内存读写，实现显著的训练加速。
