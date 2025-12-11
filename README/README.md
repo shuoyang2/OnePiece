@@ -18,7 +18,7 @@
 
 ![alt text](month_Similarity.png)
 
-  通过按月的形式将数据分片，之后我们计算任意两天（Day $i$, Day$j$）的活跃物品集合的相似度。我们采用 **Jaccard 相似度**作为度量指标：$J(Day_i, Day_j) = \frac{|Items(Day_i) \cap Items(Day_j)|}{|Items(Day_i) \cup Items(Day_j)|}$其中 $Items(Day_k)$ 是第 $k$ 天出现过的所有物品的集合。我们将这10个月的结果分别绘制成了热力图 (Heatmaps)。
+  通过按月的形式将数据分片，之后我们计算任意两天（Day $i$, Day $j$）的活跃物品集合的相似度。我们采用 **Jaccard 相似度**作为度量指标： $J(Day_i, Day_j) = \frac{|Items(Day_i) \cap Items(Day_j)|}{|Items(Day_i) \cup Items(Day_j)|}$ 其中 $Items(Day_k)$ 是第 $k$ 天出现过的所有物品的集合。我们将这10个月的结果分别绘制成了热力图 (Heatmaps)。
 
   可以发现：**非对角线（$i \neq j$）上的所有值都持续处于极低的水平**，相隔一天之间的Jaccard相似度普遍 $< 0.3$，有些月份甚至在$0.1$以下。而相隔大于两天的Jaccard相似度普遍 $< 0.1$。这说明了数据集的一个关键特性：**Item是分阶段曝光的，且大部分Item只会在短期内有曝光！**，这让我们明确了绝对时间的重要性，但在复赛中，我们陷入了长时间的异常：即通过引入绝对时间特征，validation loss显著下降，但评估指标呈现负向。最终定位到BUG是因为我们引入了User Info的时间戳信息，导致存在严重的数据泄露。修复后，年、月、日形式的绝对时间特征大约贡献了千5的收益。
 
